@@ -1,0 +1,17 @@
+|---------------------------|
+| BMP5XX-SPI                |
+|---------------------------|
+| An async SPI driver for   |
+| BMP5XX in Rust.           |
+|---------------------------|
+=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+
+This is a quick and dirty Rust port of the Adafruit C++ library for interfacing
+with BMP5XX sensors over SPI using `embedded-hal-async` since the other async
+Rust driver for BMP5XX only supports I2C. Compatible with `no_std`.
+
+=== References
+==============
+
+https://github.com/adafruit/Adafruit_BMP5xx
+https://cdn-shop.adafruit.com/product-files/6413/bst-bmp585-ds003.pdf
