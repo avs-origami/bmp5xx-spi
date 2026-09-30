@@ -42,11 +42,35 @@ impl From<Val> for (f32, f32) {
 }
 
 #[derive(Clone, Copy, Debug)]
+pub struct IntConfig {
+    pub mode: IntMode,
+    pub pol: IntPol,
+    pub drive: IntDrive,
+    pub sources: IntSources,
+    pub enable: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct IntSources {
+    pub data_ready: bool,
+    pub fifo_full: bool,
+    pub fifo_threshold: bool,
+    pub pressure_oor: bool,
+}
+
+impl IntSources {
+    fn bits(&self) -> u8 {
+        (self.data_ready as u8) | ((self.fifo_full as u8) << 1) | ((self.fifo_threshold as u8) << 2) | ((self.pressure_oor as u8) << 3)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
 pub struct BmpConfig {
     pub osr_t: OSR,
     pub osr_p: OSR,
     pub odr: ODR,
     pub pwr: PowerMode,
+    pub p_en: bool,
 }
 
 impl Default for BmpConfig {
@@ -56,6 +80,7 @@ impl Default for BmpConfig {
             osr_p: OSR::X16,
             odr: ODR::Hz50,
             pwr: PowerMode::Normal,
+            p_en: true,
         }
     }
 }
@@ -67,6 +92,7 @@ pub struct Bmp5xx<SPI: SpiDevice, D: DelayNs> {
 }
 
 impl<SPI: SpiDevice, D: DelayNs> Bmp5xx<SPI, D> {
+    /// Creates the Bmp5xx object. Must also initialize with sensor.init().
     pub fn new(spi: SPI, delay: D, config: BmpConfig) -> Self {
         return Self {
             spi,
@@ -98,6 +124,7 @@ impl<SPI: SpiDevice, D: DelayNs> Bmp5xx<SPI, D> {
         Ok(())
     }
 
+    /// Reset the sensor and set SPI mode.
     pub async fn reset(&mut self) -> Result<(), SPI::Error> {
         self.write_reg(CMD, 0xB6).await?;
         self.delay.delay_ms(6).await;
@@ -109,6 +136,8 @@ impl<SPI: SpiDevice, D: DelayNs> Bmp5xx<SPI, D> {
         }
     }
 
+    /// Initialize the sensor, waking it up from standby and configuring
+    /// the data output settings.
     pub async fn init(&mut self) -> Result<(), SPI::Error> {
         self.reset().await?;
         let status = self.read_reg(STATUS).await?;
@@ -116,18 +145,20 @@ impl<SPI: SpiDevice, D: DelayNs> Bmp5xx<SPI, D> {
         if status & 0x04 != 0 { return Err(Error::NotReady); }
         let _ = self.read_reg(INT_STATUS).await?;
 
-        self.configure().await?;
+        self.data_config().await?;
         
         Ok(())
     }
 
-    pub async fn configure(&mut self) -> Result<(), SPI::Error> {
+    /// Configure the sensor data output settings according to the config
+    /// parameters passed at sensor creation. Runs automatically at init.
+    pub async fn data_config(&mut self) -> Result<(), SPI::Error> {
         self.standby().await?;
 
         let mut regs = [0u8; 2];
         self.read_regs(OSR_CONFIG, &mut regs).await?;
 
-        let osr = (regs[0] & 0x80) | (1 << 6) | ((self.config.osr_p as u8) << 3) | (self.config.osr_t as u8);
+        let osr = (regs[0] & 0x80) | ((self.config.p_en as u8) << 6) | ((self.config.osr_p as u8) << 3) | (self.config.osr_t as u8);
         let odr = (regs[1] & 0x83) | ((self.config.odr as u8) << 2);
 
         // burst write: address auto-increments 0x36 -> 0x37
@@ -140,6 +171,19 @@ impl<SPI: SpiDevice, D: DelayNs> Bmp5xx<SPI, D> {
 
         self.set_power_mode(self.config.pwr).await?;
 
+        Ok(())
+    }
+
+    /// Configure the data-ready interrupt.
+    pub async fn int_config(&mut self, cfg: IntConfig) -> Result<(), SPI::Error> {
+        let int_conf = self.read_reg(INT_CONFIG).await?;
+        self.write_reg(INT_CONFIG, 0x00).await?;
+        self.read_reg(INT_STATUS).await?;
+
+        let int_conf = (int_conf & !0xF0) | cfg.mode as u8 | ((cfg.pol as u8) << 1) | ((cfg.drive as u8) << 2) | ((cfg.enable as u8) << 3);
+        self.write_reg(INT_CONFIG, int_conf).await?;
+        self.write_reg(INT_SOURCE, cfg.sources.bits()).await?;
+        
         Ok(())
     }
 

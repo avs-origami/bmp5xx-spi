@@ -108,3 +108,24 @@ pub enum PowerMode {
     /// Sample sensors as fast as possible.
     Continuous = 0b11,
 }
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IntMode {
+    Pulsed = 0,
+    Latched = 1,
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IntPol {
+    Low = 0,
+    High = 1,
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IntDrive {
+    PushPull = 0,
+    OpenDrain = 1,
+}
