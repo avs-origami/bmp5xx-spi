@@ -99,8 +99,12 @@ pub enum ODR {
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PowerMode {
+    /// Stops sensor measurements to enter power-saving.
     Standby = 0b00,
+    /// Sample sensors at the rate set by OSR/ODR config.
     Normal = 0b01,
+    /// Sample sensors only when the user requests to take a measurement.
     Forced = 0b10,
-    NonStop = 0b11,
+    /// Sample sensors as fast as possible.
+    Continuous = 0b11,
 }

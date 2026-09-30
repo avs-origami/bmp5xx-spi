@@ -23,11 +23,30 @@ impl<E> From<E> for Error<E> {
 
 pub type Result<T, E> = core::result::Result<T, Error<E>>;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Val {
+    pub t: f32,
+    pub p: f32
+}
+
+impl From<(f32, f32)> for Val {
+    fn from(value: (f32, f32)) -> Self {
+        Val { t: value.0, p: value.1 }
+    }
+}
+
+impl From<Val> for (f32, f32) {
+    fn from(value: Val) -> Self {
+        (value.t, value.p)
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct BmpConfig {
     pub osr_t: OSR,
     pub osr_p: OSR,
     pub odr: ODR,
+    pub pwr: PowerMode,
 }
 
 impl Default for BmpConfig {
@@ -36,6 +55,7 @@ impl Default for BmpConfig {
             osr_t: OSR::X2,
             osr_p: OSR::X16,
             odr: ODR::Hz50,
+            pwr: PowerMode::Normal,
         }
     }
 }
@@ -71,7 +91,7 @@ impl<SPI: SpiDevice, D: DelayNs> Bmp5xx<SPI, D> {
         Ok(())
     }
 
-    async fn enter_standby(&mut self) -> Result<(), SPI::Error> {
+    async fn standby(&mut self) -> Result<(), SPI::Error> {
         let odr = self.read_reg(ODR_CONFIG).await?;
         self.write_reg(ODR_CONFIG, (odr & !0x03) | 0x80).await?;
         self.delay.delay_us(2500).await;
@@ -102,7 +122,7 @@ impl<SPI: SpiDevice, D: DelayNs> Bmp5xx<SPI, D> {
     }
 
     pub async fn configure(&mut self) -> Result<(), SPI::Error> {
-        self.enter_standby().await?;
+        self.standby().await?;
 
         let mut regs = [0u8; 2];
         self.read_regs(OSR_CONFIG, &mut regs).await?;
@@ -118,11 +138,33 @@ impl<SPI: SpiDevice, D: DelayNs> Bmp5xx<SPI, D> {
             return Err(Error::BadConfig);
         }
 
+        self.set_power_mode(self.config.pwr).await?;
+
         Ok(())
     }
 
+    /// Set the sensor power mode; see `PowerMode` for explanation of each.
     pub async fn set_power_mode(&mut self, mode: PowerMode) -> Result<(), SPI::Error> {
-        let odr = self.read_reg(ODR_CONFIG).await?;
-        self.write_reg(ODR_CONFIG, (odr & !0x03) | mode as u8).await
+        // From Bosch BMP5 implementations -- must set standby before switching
+        // to a different power mode.
+        self.standby().await?;
+        
+        if mode != PowerMode::Standby {
+            let odr = self.read_reg(ODR_CONFIG).await?;
+            self.write_reg(ODR_CONFIG, (odr & !0x03) | mode as u8).await?;
+        }
+
+        Ok(())
+    }
+
+    /// Read the temperature (in Celsius) and pressure (in Pa).
+    pub async fn read(&mut self) -> Result<Val, SPI::Error> {
+        let mut buf = [0u8; 6];
+        self.read_regs(TEMP_DATA_XLSB, &mut buf).await?;
+
+        Ok(Val {
+            t: LittleEndian::read_i24(&buf[0..3]) as f32 / 65536.0,
+            p: LittleEndian::read_u24(&buf[3..6]) as f32 / 64.0
+        })
     }
 }
